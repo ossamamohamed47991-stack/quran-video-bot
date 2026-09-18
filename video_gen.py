@@ -8,6 +8,7 @@
 """
 import os
 import re
+import random
 import subprocess
 import tempfile
 import logging
@@ -125,6 +126,7 @@ def fetch_ayah(surah, ayah, reciter="alafasy", lang=None):
     data = r.json()["data"]
     result = {
         "text": data["text"],
+        "surah": surah,
         "surah_name": data["surah"]["name"],
         "surah_en": data["surah"]["englishName"],
         "ayah": data["numberInSurah"],
@@ -180,6 +182,17 @@ def make_bg(out_png, theme="default"):
     img = _gradient_bg(theme=theme)
     img = _decorate(img)
     img.convert("RGB").save(out_png)
+
+
+def _ai_bg(out_png, prompt, theme="default"):
+    """خلفية مولّدة بالذكاء الاصطناعي من معنى الآية (Pollinations — مجاني، من غير API key)"""
+    url = ("https://image.pollinations.ai/prompt/"
+           f"{requests.utils.quote(prompt[:300])}"
+           f"?width={W}&height={H}&nologo=true&seed={random.randint(0, 99999)}")
+    r = requests.get(url, timeout=180)
+    r.raise_for_status()
+    with open(out_png, "wb") as f:
+        f.write(r.content)
 
 
 # ---------------------------------------------------------------- ASS: النصوص
@@ -379,13 +392,15 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
             # اللي بيكدس فريمات في الذاكرة => SIGKILL على استضافة 512MB)
             z = f"1+0.15*min(t/{dur:.3f},1)"
             eval_opt = "" if FFMPEG_MAJOR >= 7 else ":eval=frame"
+            dark = "eq=brightness=-0.12:saturation=1.05," if style == "ai" else ""
             vf = (f"scale=trunc(iw*1.2/2)*2:trunc(ih*1.2/2)*2,"
                   f"crop=w='iw/({z})':h='ih/({z})':x='(iw-ow)/2':y='(ih-oh)/2'{eval_opt},"
-                  f"scale={W}:{H},"
+                  f"scale={W}:{H},{dark}"
                   f"ass={ass_rel}:fontsdir=fonts,"
                   f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7")
         else:
-            vf = (f"ass={ass_rel}:fontsdir=fonts,"
+            dark = "eq=brightness=-0.12:saturation=1.05," if style == "ai" else ""
+            vf = (f"{dark}ass={ass_rel}:fontsdir=fonts,"
                   f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7")
         cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.3f}", "-i", bg_png,
                "-i", audio_mp3,
@@ -446,6 +461,24 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
 
         if style == "nature":
             bg_png = None
+        elif style == "ai":
+            # خلفية AI من معنى الآية (الترجمة الإنجليزية كـ prompt)
+            prompt = info.get("translation") or ""
+            if not prompt:
+                try:
+                    r = requests.get(
+                        f"{API_BASE}/ayah/{info['surah']}:{info['ayah']}/en.sahih",
+                        timeout=30)
+                    prompt = r.json()["data"]["text"]
+                except Exception:
+                    prompt = ""
+            if not prompt:
+                prompt = f"beautiful islamic art, quran, {info['surah_name']}"
+            try:
+                _ai_bg(bg_png, prompt)
+            except Exception as e:
+                log.warning(f"خلفية AI فشلت: {e} — بديل: تدرج")
+                make_bg(bg_png, theme=theme)
         else:
             make_bg(bg_png, theme=theme)
 

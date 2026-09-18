@@ -43,7 +43,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "• بقارئ وثيم: `/video 2:255 husary sunset`\n"
         "• مع ترجمة: `/video 2:255 alafasy en`\n"
         "• مع تفسير: `/video 2:255 alafasy tafsir`\n"
-        "• للحفظ (تكرار 3x): `/video 2:255 alafasy repeat`\n\n"
+        "• للحفظ (تكرار 3x): `/video 2:255 alafasy repeat`\n"
+        "• خلفية ذكاء اصطناعي: `/video 2:255 alafasy ai`\n\n"
         "اللغات: `en fr tr ru es de id bn ur fa hi ta ml sw uz`\n"
         "المفسرون: `tafsir` (الميسر) `jalalayn` (جلالين)\n\n"
         "القراء المتاحون:\n"
@@ -118,7 +119,7 @@ async def cmd_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     reciter = args[1] if len(args) > 1 and args[1] in RECITERS else DEFAULT_RECITER
     lang = args[2] if len(args) > 2 and len(args[2]) <= 10 and args[2] not in ["sunset", "dark", "nature", "gradient"] else None
     
-    style = "nature" if "nature" in args else "gradient"
+    style = "ai" if "ai" in args else ("nature" if "nature" in args else "gradient")
     theme = "sunset" if "sunset" in args else ("dark" if "dark" in args else "default")
     repeat = 3 if ("repeat" in args or "x3" in args) else 1
     

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مُولّد الفيديوهات القرآنية - Telegram Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: Tahoma, sans-serif; background: #0c1b2a; color: #fff; padding: 20px; text-align: center; }
+        .card { background: #1b2a4a; padding: 20px; border-radius: 12px; margin-top: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        select, input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 8px; border: none; background: #0c1b2a; color: #fff; font-size: 16px; }
+        button { background: #ffd700; color: #0c1b2a; border: none; padding: 14px 20px; font-size: 18px; font-weight: bold; border-radius: 8px; width: 100%; cursor: pointer; margin-top: 15px; }
+        button:hover { background: #ffc107; }
+    </style>
+</head>
+<body>
+    <h1>🌙 صانع الريلز القرآني</h1>
+    <div class="card">
+        <label>رقم السورة والآية (مثال: 2:255 أو 2:255-258):</label>
+        <input type="text" id="ayahInput" value="2:255" placeholder="مثال: 2:255">
+
+        <label>اختر القارئ:</label>
+        <select id="reciterSelect">
+            <option value="alafasy">مشاري العفاسي</option>
+            <option value="abdulbasit">عبد الباسط عبد الصمد (مرتل)</option>
+            <option value="husary">محمود خليل الحصري</option>
+            <option value="minshawi">محمد صديق المنشاوي</option>
+            <option value="sudais">عبد الرحمن السديس</option>
+            <option value="maher">ماهر المعيقلي</option>
+        </select>
+
+        <label>ثيم الخلفية:</label>
+        <select id="themeSelect">
+            <option value="default">كلاسيكي أزرق</option>
+            <option value="sunset">غروب دافئ</option>
+            <option value="dark">أسود ليلي فاخر</option>
+            <option value="nature_gradient">طبيعي هادئ</option>
+        </select>
+
+        <button onclick="generateVideo()">إنشاء وإرسال الفيديو 🎬</button>
+    </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+
+        function generateVideo() {
+            let ayah = document.getElementById('ayahInput').value;
+            let reciter = document.getElementById('reciterSelect').value;
+            let theme = document.getElementById('themeSelect').value;
+            
+            tg.sendData(JSON.stringify({ayah, reciter, theme}));
+            tg.close();
+        }
+    </script>
+</body>
+</html>

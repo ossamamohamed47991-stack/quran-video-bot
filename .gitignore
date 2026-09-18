@@ -1,0 +1,18 @@
+# السرية — ممنوع رفعها
+config.py
+.env
+*.log
+
+# بيئة بايثون
+.venv/
+__pycache__/
+*.pyc
+
+# ملفات كبيرة / عينات
+samples_*.mp4
+test_*.mp4
+*.mp4.tmp
+
+# نظام التشغيل
+Thumbs.db
+.DS_Store

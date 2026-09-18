@@ -76,6 +76,20 @@ W, H = (int(x) for x in _res.lower().split("x"))  # 9:16
 ASS_W, ASS_H = 1080, 1920
 
 
+def _ffmpeg_major():
+    """نسخة ffmpeg الرئيسية — ffmpeg 7+ شال خيار eval من فلتر crop"""
+    try:
+        out = subprocess.run(["ffmpeg", "-version"], capture_output=True,
+                             text=True, timeout=10).stdout
+        m = re.search(r"ffmpeg version (\d+)", out)
+        return int(m.group(1)) if m else 0
+    except Exception:
+        return 0
+
+
+FFMPEG_MAJOR = _ffmpeg_major()
+
+
 def _ar(text):
     return get_display(arabic_reshaper.reshape(text))
 
@@ -327,22 +341,26 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
         cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", bg_video,
                "-i", audio_mp3, "-filter_complex", vf,
                "-map", "[v]", "-map", "1:a",
-               "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                "-c:a", "aac", "-b:a", "192k", "-af", af,
                "-pix_fmt", "yuv420p", "-shortest", "-movflags", "+faststart", out_mp4]
     else:
-        frames = max(1, int(dur * 30))
         if zoom:
-            vf = (f"zoompan=z='min(zoom+0.0002,1.15)':d={frames}:"
-                  f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps=30,"
+            # Ken Burns خفيف على الذاكرة: scale + crop بتقييم لكل فريم (بدل zoompan
+            # اللي بيكدس فريمات في الذاكرة => SIGKILL على استضافة 512MB)
+            z = f"1+0.15*min(t/{dur:.3f},1)"
+            eval_opt = "" if FFMPEG_MAJOR >= 7 else ":eval=frame"
+            vf = (f"scale=trunc(iw*1.2/2)*2:trunc(ih*1.2/2)*2,"
+                  f"crop=w='iw/({z})':h='ih/({z})':x='(iw-ow)/2':y='(ih-oh)/2'{eval_opt},"
+                  f"scale={W}:{H},"
                   f"ass={ass_rel}:fontsdir=fonts,"
                   f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7")
         else:
             vf = (f"ass={ass_rel}:fontsdir=fonts,"
                   f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7")
-        cmd = ["ffmpeg", "-y", "-i", bg_png, "-i", audio_mp3,
+        cmd = ["ffmpeg", "-y", "-loop", "1", "-i", bg_png, "-i", audio_mp3,
                "-vf", vf, "-map", "0:v", "-map", "1:a",
-               "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                "-c:a", "aac", "-b:a", "192k", "-af", af,
                "-pix_fmt", "yuv420p", "-shortest", "-movflags", "+faststart", out_mp4]
     subprocess.run(cmd, check=True, capture_output=True, timeout=900, cwd=cwd)

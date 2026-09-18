@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import json
+import hashlib
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
@@ -61,10 +62,27 @@ async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE, surah: in
     msg = await update.message.reply_text(
         f"🎬 جاري تجهيز الفيديو المطوّر...\n{label}{repeat_txt} — {RECITER_NAMES.get(reciter, reciter)}")
     try:
+        # كاش: نفس الطلب => نفس الملف => رد فوري
+        cache_dir = os.environ.get("CACHE_DIR", os.path.join(tempfile.gettempdir(), "quran_cache"))
+        os.makedirs(cache_dir, exist_ok=True)
+        key = hashlib.md5(
+            f"{surah}:{ayah_from}-{ayah_to}:{reciter}:{lang}:{style}:{theme}:{repeat}:{os.environ.get('VIDEO_RES','720x1280')}".encode()
+        ).hexdigest()
+        out = os.path.join(cache_dir, f"{key}.mp4")
+        if os.path.isfile(out):
+            log.info(f"كاش: {label} موجود — رد فوري")
+            with open(out, "rb") as f:
+                await update.message.reply_video(
+                    f,
+                    caption=f"﴿ {label} ﴾ (من الكاش)\n🎙 {RECITER_NAMES.get(reciter, reciter)}",
+                    supports_streaming=True,
+                )
+            await msg.delete()
+            return
+
         infos = [fetch_ayah(surah, a, reciter=reciter, lang=lang)
                  for a in range(ayah_from, ayah_to + 1)]
         tmp = tempfile.mkdtemp(prefix="quran_bot_")
-        out = os.path.join(tmp, f"video_{surah}_{ayah_from}-{ayah_to}.mp4")
         make_video(infos, out, workdir=tmp, style=style, theme=theme, repeat=repeat)
         with open(out, "rb") as f:
             await update.message.reply_video(

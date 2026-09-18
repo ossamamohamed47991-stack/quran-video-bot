@@ -341,7 +341,7 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
               f"crop={W}:{H},eq=brightness=-0.12:saturation=1.05,"
               f"ass={ass_rel}:fontsdir=fonts,"
               f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7[v]")
-        cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", bg_video,
+        cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-t", f"{dur:.3f}", "-i", bg_video,
                "-i", audio_mp3, "-filter_complex", vf,
                "-map", "[v]", "-map", "1:a",
                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -361,11 +361,12 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
         else:
             vf = (f"ass={ass_rel}:fontsdir=fonts,"
                   f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7")
-        cmd = ["ffmpeg", "-y", "-loop", "1", "-i", bg_png, "-i", audio_mp3,
+        cmd = ["ffmpeg", "-y", "-loop", "1", "-t", f"{dur:.3f}", "-i", bg_png,
+               "-i", audio_mp3,
                "-vf", vf, "-map", "0:v", "-map", "1:a",
                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                "-c:a", "aac", "-b:a", "192k", "-af", af,
-               "-pix_fmt", "yuv420p", "-t", f"{dur:.3f}", "-shortest",
+               "-pix_fmt", "yuv420p",
                "-movflags", "+faststart", out_mp4]
     subprocess.run(cmd, check=True, capture_output=True, timeout=900, cwd=cwd)
 
@@ -378,6 +379,18 @@ def _concat_segments(segments, out_mp4):
     cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_file,
            "-c", "copy", "-movflags", "+faststart", out_mp4]
     subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+
+
+def _rss_mb():
+    """ذاكرة العملية الحالية (Linux) — للتشخيص"""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS"):
+                    return round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        pass
+    return None
 
 
 def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, theme="default"):
@@ -416,6 +429,7 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
         _trim_silence(audio_raw, audio_trim)
         dur = _audio_duration(audio_trim)
         build_ass(info, dur, ass_file)
+        log.info(f"RSS قبل التشفير: {_rss_mb()} MB (مدة الصوت {dur:.1f}s)")
         try:
             _encode_segment(bg_png, audio_trim, ass_file, seg_mp4, style=style, zoom=zoom,
                             cwd=tmp)

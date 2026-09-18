@@ -12,7 +12,8 @@ from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (Application, CommandHandler, MessageHandler, ContextTypes,
+                          filters, ChatMemberHandler)
 
 from config import BOT_TOKEN, DEFAULT_RECITER, ALLOWED_USERS
 from video_gen import fetch_ayah, make_video, RECITERS, VERSE_COUNTS
@@ -344,7 +345,7 @@ def main():
     app.add_handler(CommandHandler("daily", cmd_daily))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, plain_message))
-    app.add_handler(MessageHandler(filters.StatusUpdate.MY_CHAT_MEMBER, my_chat_member))
+    app.add_handler(ChatMemberHandler(my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
     # جدولة آية اليوم (افتراضياً 06:00 بتوقيت القاهرة)
     daily_time = os.environ.get("DAILY_TIME", "06:00")

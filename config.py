@@ -10,3 +10,7 @@ DEFAULT_RECITER = "alafasy"
 
 # لو فاضي => أي حد يستخدم البوت. لو حاطط IDs => محدود عليهم بس
 ALLOWED_USERS = []
+
+# صاحب البوت (الـ admin) — باليوزرنيم أو بالـ ID
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "ZI_83")
+OWNER_USER_IDS = [int(x) for x in os.environ.get("OWNER_USER_IDS", "").split(",") if x.strip()]

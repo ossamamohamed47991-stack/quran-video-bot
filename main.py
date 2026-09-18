@@ -8,14 +8,15 @@ import os
 import random
 import re
 import tempfile
+import time
 from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (Application, CommandHandler, MessageHandler, ContextTypes,
-                          filters, ChatMemberHandler)
+                          filters, ChatMemberHandler, CallbackQueryHandler)
 
-from config import BOT_TOKEN, DEFAULT_RECITER, ALLOWED_USERS
+from config import BOT_TOKEN, DEFAULT_RECITER, ALLOWED_USERS, OWNER_USERNAME, OWNER_USER_IDS
 from video_gen import fetch_ayah, make_video, RECITERS, VERSE_COUNTS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -30,6 +31,7 @@ AYAH_RE = re.compile(r"^(\d{1,3})\s*[:/]\s*(\d{1,3})(?:\s*-\s*(\d{1,3}))?$")
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 DATA_FILE = os.path.join(DATA_DIR, "bot_data.json")
 CAIRO = ZoneInfo("Africa/Cairo")
+BOT_START = time.time()
 
 
 def load_data():
@@ -50,9 +52,33 @@ def _allowed(user_id):
     return not ALLOWED_USERS or user_id in ALLOWED_USERS
 
 
+def _is_owner(user):
+    if not user:
+        return False
+    if user.id in OWNER_USER_IDS:
+        return True
+    return bool(user.username) and user.username.lower() == OWNER_USERNAME.lower()
+
+
+def track_user(user_id, username=None):
+    """تسجيل المستخدمين للإحصائيات والبث"""
+    data = load_data()
+    users = data.setdefault("users", {})
+    key = str(user_id)
+    now = time.strftime("%Y-%m-%d %H:%M")
+    if key in users:
+        users[key]["last_seen"] = now
+        users[key]["requests"] = users[key].get("requests", 0) + 1
+    else:
+        users[key] = {"username": username, "first_seen": now,
+                      "last_seen": now, "requests": 1}
+    save_data(data)
+
+
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
+    track_user(update.effective_user.id, update.effective_user.username)
 
     keyboard = [
         [InlineKeyboardButton("📱 افتح صانع الفيديوهات (Mini App)", web_app=WebAppInfo(url="https://example.com/webapp"))]
@@ -135,6 +161,7 @@ async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE, surah: in
 async def cmd_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
+    track_user(update.effective_user.id, update.effective_user.username)
     args = ctx.args
     if not args:
         await update.message.reply_text("استخدم: `/video 2:255` أو `/video 2:255 husary sunset`",
@@ -161,6 +188,7 @@ async def cmd_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def plain_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
+    track_user(update.effective_user.id, update.effective_user.username)
 
     # Check if coming from Mini App web_app_data
     if update.message.web_app_data:
@@ -320,6 +348,155 @@ async def daily_ayah_job(ctx: ContextTypes.DEFAULT_TYPE):
         log.exception("فشل نشر آية اليوم")
 
 
+# ---------------------------------------------------------------- لوحة التحكم
+
+def _cache_stats():
+    cache_dir = os.environ.get("CACHE_DIR", os.path.join(tempfile.gettempdir(), "quran_cache"))
+    try:
+        files = [f for f in os.listdir(cache_dir) if f.endswith(".mp4")]
+        size = sum(os.path.getsize(os.path.join(cache_dir, f)) for f in files)
+        return len(files), round(size / 1024 / 1024, 1)
+    except Exception:
+        return 0, 0.0
+
+
+def _uptime():
+    secs = int(time.time() - BOT_START)
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}س {m}د {s}ث"
+
+
+def _rss():
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS"):
+                    return f"{round(int(line.split()[1]) / 1024, 1)} MB"
+    except Exception:
+        pass
+    return "—"
+
+
+def _admin_panel_text():
+    data = load_data()
+    users = data.get("users", {})
+    n_cache, cache_mb = _cache_stats()
+    channel = data.get("channel_title") or "مفيش"
+    daily = "مفعلة" if data.get("daily_enabled", True) else "موقفة"
+    total_req = sum(u.get("requests", 0) for u in users.values())
+    return (
+        "🔧 لوحة التحكم\n\n"
+        f"👥 المستخدمون: {len(users)}\n"
+        f"🎬 طلبات الفيديو: {total_req}\n"
+        f"💾 الكاش: {n_cache} ملف ({cache_mb} MB)\n"
+        f"📢 القناة: {channel}\n"
+        f"⏰ آية اليوم: {daily} (06:00)\n"
+        f"🕐 شغال منذ: {_uptime()}\n"
+        f"🧠 ذاكرة البوت: {_rss()}"
+    )
+
+
+def _admin_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 إحصائيات", callback_data="adm_stats"),
+         InlineKeyboardButton("🧹 مسح الكاش", callback_data="adm_cache")],
+        [InlineKeyboardButton("📢 القناة", callback_data="adm_channel"),
+         InlineKeyboardButton("⏰ آية اليوم", callback_data="adm_daily")],
+        [InlineKeyboardButton("📨 بث للجميع", callback_data="adm_broadcast"),
+         InlineKeyboardButton("🔄 تحديث", callback_data="adm_refresh")],
+    ])
+
+
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not _is_owner(update.effective_user):
+        await update.message.reply_text("❌ دي لوحة مخصوصة لصاحب البوت.")
+        return
+    await update.message.reply_text(_admin_panel_text(), reply_markup=_admin_keyboard())
+
+
+async def admin_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if not _is_owner(q.from_user):
+        await q.edit_message_text("❌ دي لوحة مخصوصة لصاحب البوت.")
+        return
+    data = load_data()
+    action = q.data
+
+    if action == "adm_stats":
+        users = data.get("users", {})
+        lines = ["📊 إحصائيات المستخدمين:\n"]
+        for uid, u in sorted(users.items(), key=lambda x: -x[1].get("requests", 0))[:10]:
+            name = u.get("username") or uid
+            lines.append(f"• @{name} — {u.get('requests', 0)} طلب")
+        await q.edit_message_text("\n".join(lines) or "مفيش مستخدمين لسه.",
+                                  reply_markup=_admin_keyboard())
+
+    elif action == "adm_cache":
+        cache_dir = os.environ.get("CACHE_DIR", os.path.join(tempfile.gettempdir(), "quran_cache"))
+        n = 0
+        try:
+            for f in os.listdir(cache_dir):
+                if f.endswith(".mp4"):
+                    os.remove(os.path.join(cache_dir, f))
+                    n += 1
+        except Exception as e:
+            log.warning(f"مسح الكاش فشل: {e}")
+        await q.edit_message_text(f"🧹 اتمسح {n} ملف كاش.",
+                                  reply_markup=_admin_keyboard())
+
+    elif action == "adm_channel":
+        if data.get("channel_id"):
+            await q.edit_message_text(
+                f"📢 القناة المرتبطة: **{data.get('channel_title')}**\n"
+                f"ID: `{data.get('channel_id')}`\n"
+                f"لفك الربط: `/unlinkchannel`",
+                parse_mode="Markdown", reply_markup=_admin_keyboard())
+        else:
+            await q.edit_message_text(
+                "📢 مفيش قناة مرتبطة.\n"
+                "1. أضف البوت كأدمن في قناتك\n"
+                "2. أرسل `/confirm`",
+                parse_mode="Markdown", reply_markup=_admin_keyboard())
+
+    elif action == "adm_daily":
+        data["daily_enabled"] = not data.get("daily_enabled", True)
+        save_data(data)
+        state = "مفعلة ✅" if data["daily_enabled"] else "موقفة ⏸"
+        await q.edit_message_text(f"⏰ آية اليوم: {state}",
+                                  reply_markup=_admin_keyboard())
+
+    elif action == "adm_broadcast":
+        await q.edit_message_text(
+            "📨 للبث للجميع:\nأرسل `/broadcast رسالتك`\n\n"
+            "مثال: `/broadcast السلام عليكم 🌙`",
+            parse_mode="Markdown", reply_markup=_admin_keyboard())
+
+    elif action == "adm_refresh":
+        await q.edit_message_text(_admin_panel_text(), reply_markup=_admin_keyboard())
+
+
+async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not _is_owner(update.effective_user):
+        await update.message.reply_text("❌ دي ميزة مخصوصة لصاحب البوت.")
+        return
+    text = " ".join(ctx.args).strip()
+    if not text:
+        await update.message.reply_text("استخدم: `/broadcast رسالتك`", parse_mode="Markdown")
+        return
+    data = load_data()
+    users = data.get("users", {})
+    sent, failed = 0, 0
+    for uid in users:
+        try:
+            await ctx.bot.send_message(int(uid), text)
+            sent += 1
+        except Exception:
+            failed += 1
+    await update.message.reply_text(f"📨 تم البث: {sent} وصلت، {failed} فشلت (من أصل {len(users)}).")
+
+
 def main():
     # تشخيص البيئة: نسخة ffmpeg + الذاكرة المتاحة
     try:
@@ -343,6 +520,10 @@ def main():
     app.add_handler(CommandHandler("unlinkchannel", cmd_unlinkchannel))
     app.add_handler(CommandHandler("channel", cmd_channel))
     app.add_handler(CommandHandler("daily", cmd_daily))
+    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("panel", cmd_admin))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^adm_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, plain_message))
     app.add_handler(ChatMemberHandler(my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))

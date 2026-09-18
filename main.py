@@ -153,8 +153,8 @@ def main():
         f"https://{public_domain}" if public_domain else "")
     if webhook_url:
         port = int(os.environ.get("PORT", "8080"))
-        url_path = BOT_TOKEN  # مسار سري لا يعرفه غير تليجرام
-        secret = BOT_TOKEN
+        url_path = BOT_TOKEN.replace(":", "-")  # مسار سري لا يعرفه غير تليجرام
+        secret = BOT_TOKEN.replace(":", "-")    # تليجرام يرفض ":" في الـ secret token
 
         async def post_init(application):
             await application.bot.set_webhook(

@@ -40,7 +40,10 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "`2:255` أو نطاق `2:255-258`\n\n"
         "أو استخدم الأوامر المتقدمة:\n"
         "• بقارئ وثيم: `/video 2:255 husary sunset`\n"
-        "• مع ترجمة: `/video 2:255 alafasy en`\n\n"
+        "• مع ترجمة: `/video 2:255 alafasy en`\n"
+        "• مع تفسير: `/video 2:255 alafasy tafsir`\n\n"
+        "اللغات: `en fr tr ru es de id bn ur fa hi ta ml sw uz`\n"
+        "المفسرون: `tafsir` (الميسر) `jalalayn` (جلالين)\n\n"
         "القراء المتاحون:\n"
         + "\n".join(f"`{k}` — {v}" for k, v in RECITER_NAMES.items()) +
         "\n\n🎬 الفيديو بدقة 9:16 جاهز للشورتس والريلز والاستوري",

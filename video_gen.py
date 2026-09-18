@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 API_BASE = "https://api.alquran.cloud/v1"
 EVERYAYAH_BASE = "https://everyayah.com/data"
 
+# اختصارات اللغات → إصدارات alquran.cloud
+LANG_MAP = {
+    "en": "en.sahih", "fr": "fr.hamidullah", "tr": "tr.diyanet",
+    "ru": "ru.kuliev", "es": "es.cortes", "de": "de.aburida",
+    "id": "id.indonesian", "bn": "bn.bengali", "ur": "ur.jalandhry",
+    "fa": "fa.ansarian", "hi": "hi.farooq", "ta": "ta.tamil",
+    "ml": "ml.abdulhameed", "sw": "sw.barwani", "uz": "uz.mahmut",
+    "tafsir": "ar.muyassar", "jalalayn": "ar.jalalayn",
+}
+
 # رمز السطر الجديد في ASS (خارج الـ f-string عشان يتوافق مع Python < 3.12)
 _N = "\\N"
 
@@ -124,7 +134,8 @@ def fetch_ayah(surah, ayah, reciter="alafasy", lang=None):
     reciter_name, folder = RECITERS.get(reciter, RECITERS["alafasy"])
     result["audio_url"] = f"{EVERYAYAH_BASE}/{folder}/{surah:03d}{ayah:03d}.mp3"
     if lang:
-        r3 = requests.get(f"{API_BASE}/ayah/{surah}:{ayah}/{lang}", timeout=30)
+        edition = LANG_MAP.get(lang, lang)  # اختصار -> إصدار كامل، أو إصدار مكتوب صراحة
+        r3 = requests.get(f"{API_BASE}/ayah/{surah}:{ayah}/{edition}", timeout=30)
         if r3.status_code == 200:
             result["translation"] = r3.json()["data"]["text"]
     return result
@@ -244,12 +255,16 @@ def build_ass(ayah_info, duration, out_ass):
                                        _font_size_for(words), max_w, bottom - top,
                                        min_size=30, line_ratio=1.5)
 
-    # الترجمة
+    # الترجمة (لو عربية => خط عربي)
     tr_lines, tr_fs, tr_h = [], 0, 0
+    tr_arabic = False
     if ayah_info.get("translation"):
+        tr_arabic = bool(re.search(r"[\u0600-\u06FF]", ayah_info["translation"]))
         tr_max = int((bottom - top) * 0.45)
-        tr_lines, tr_fs, tr_h = _fit_block(d, ayah_info["translation"], FONT_LATIN,
-                                           36, max_w, tr_max, min_size=22, line_ratio=1.4)
+        tr_font = FONT_ARABIC if tr_arabic else FONT_LATIN
+        tr_lines, tr_fs, tr_h = _fit_block(d, ayah_info["translation"], tr_font,
+                                           36, max_w, tr_max, min_size=22,
+                                           line_ratio=1.5 if tr_arabic else 1.4)
 
     total_h = ar_h + (60 + tr_h if tr_lines else 0)
     y_start = top + max(0.0, (bottom - top - total_h) / 2)
@@ -277,7 +292,7 @@ def build_ass(ayah_info, duration, out_ass):
         f"Style: Header,{ASS_FONT_HEADER},54,&H0082D7FF,&H0082D7FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,8,60,60,140,1",
         f"Style: Reciter,{ASS_FONT_RECITER},40,&H00DCD2C8,&H00DCD2C8,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,8,60,60,230,1",
         f"Style: Ayah,{ASS_FONT_AYAH},{ar_fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,3,1,5,60,60,0,1",
-        f"Style: Trans,{ASS_FONT_TRANS},{tr_fs or 30},&H00EBEBEB,&H00EBEBEB,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
+        f"Style: Trans,{ASS_FONT_AYAH if tr_arabic else ASS_FONT_TRANS},{tr_fs or 30},&H00EBEBEB,&H00EBEBEB,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
         f"Style: Num,{ASS_FONT_AYAH},50,&H0082D7FF,&H0082D7FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
         "",
         "[Events]",

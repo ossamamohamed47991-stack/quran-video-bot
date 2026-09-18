@@ -67,7 +67,13 @@ VERSE_COUNTS = {
     111: 5, 112: 4, 113: 5, 114: 6,
 }
 
-W, H = 1080, 1920  # 9:16
+# دقة الفيديو: 720x1280 افتراضياً (تناسب ذاكرة الاستضافة المجانية).
+# للدقة الكاملة 1080x1920: حط متغير البيئة VIDEO_RES=1080x1920
+_res = os.environ.get("VIDEO_RES", "720x1280")
+W, H = (int(x) for x in _res.lower().split("x"))  # 9:16
+
+# مساحة تخطيط الترجمة (ASS) ثابتة — libass بيقيسها تلقائياً لدقة الفيديو
+ASS_W, ASS_H = 1080, 1920
 
 
 def _ar(text):
@@ -212,8 +218,8 @@ def _fit_block(d, text, font_path, start_size, max_w, max_h, min_size, line_rati
 def build_ass(ayah_info, duration, out_ass):
     """يبني ملف ASS لعرض نص الآية + الترجمة بتشكيل سليم (libass/HarfBuzz)"""
     d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-    max_w = W - 160
-    top, bottom = 340, H - 260
+    max_w = ASS_W - 160
+    top, bottom = 340, ASS_H - 260
 
     # نص الآية
     words = len(ayah_info["text"].split())
@@ -244,8 +250,8 @@ def build_ass(ayah_info, duration, out_ass):
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
-        f"PlayResX: {W}",
-        f"PlayResY: {H}",
+        f"PlayResX: {ASS_W}",
+        f"PlayResY: {ASS_H}",
         "WrapStyle: 2",
         "ScaledBorderAndShadow: yes",
         "",
@@ -267,7 +273,7 @@ def build_ass(ayah_info, duration, out_ass):
         lines.append(
             f"Dialogue: 0,{start},{end},Trans,,0,0,0,,{{\\an5\\pos(540,{y_tr_center:.0f})}}{_ass_escape(chr(10).join(tr_lines)).replace(chr(10), _N)}")
     lines.append(
-        f"Dialogue: 0,{start},{end},Num,,0,0,0,,{{\\an5\\pos(540,{H - 250})}}{_ass_escape(num)}")
+        f"Dialogue: 0,{start},{end},Num,,0,0,0,,{{\\an5\\pos(540,{ASS_H - 250})}}{_ass_escape(num)}")
 
     with open(out_ass, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(lines))
@@ -314,8 +320,8 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
 
     if style == "nature":
         bg_video = os.path.join(BG_DIR, "nature_part31.mp4")
-        vf = (f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-              f"crop=1080:1920,eq=brightness=-0.12:saturation=1.05,"
+        vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+              f"crop={W}:{H},eq=brightness=-0.12:saturation=1.05,"
               f"ass={ass_rel}:fontsdir=fonts,"
               f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7[v]")
         cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", bg_video,
@@ -328,7 +334,7 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
         frames = max(1, int(dur * 30))
         if zoom:
             vf = (f"zoompan=z='min(zoom+0.0002,1.15)':d={frames}:"
-                  f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,"
+                  f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps=30,"
                   f"ass={ass_rel}:fontsdir=fonts,"
                   f"fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.2f}:d=0.7")
         else:

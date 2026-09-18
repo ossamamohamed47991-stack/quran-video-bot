@@ -147,13 +147,34 @@ def main():
     except Exception as e:
         log.warning(f"تشخيص البيئة فشل: {e}")
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("video", cmd_video))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_message))
-    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, plain_message))
-    log.info("البوت المطوّر شغال...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Webhook mode على Railway (أسرع وأخف من polling)
+    public_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    webhook_url = os.environ.get("WEBHOOK_URL", "").strip() or (
+        f"https://{public_domain}" if public_domain else "")
+    if webhook_url:
+        port = int(os.environ.get("PORT", "8080"))
+        url_path = BOT_TOKEN  # مسار سري لا يعرفه غير تليجرام
+        secret = BOT_TOKEN
+
+        async def post_init(application):
+            await application.bot.set_webhook(
+                url=f"{webhook_url}/{url_path}",
+                secret_token=secret,
+                drop_pending_updates=True,
+            )
+            log.info(f"Webhook set: {webhook_url}/{url_path}")
+
+        app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("video", cmd_video))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_message))
+        app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, plain_message))
+        log.info(f"Webhook mode على المنفذ {port}")
+        app.run_webhook(listen="0.0.0.0", port=port, url_path=url_path,
+                        secret_token=secret, allowed_updates=Update.ALL_TYPES)
+    else:
+        log.info("Polling mode (مفيش WEBHOOK_URL — تشغيل محلي)")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

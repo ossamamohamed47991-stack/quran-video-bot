@@ -41,7 +41,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "أو استخدم الأوامر المتقدمة:\n"
         "• بقارئ وثيم: `/video 2:255 husary sunset`\n"
         "• مع ترجمة: `/video 2:255 alafasy en`\n"
-        "• مع تفسير: `/video 2:255 alafasy tafsir`\n\n"
+        "• مع تفسير: `/video 2:255 alafasy tafsir`\n"
+        "• للحفظ (تكرار 3x): `/video 2:255 alafasy repeat`\n\n"
         "اللغات: `en fr tr ru es de id bn ur fa hi ta ml sw uz`\n"
         "المفسرون: `tafsir` (الميسر) `jalalayn` (جلالين)\n\n"
         "القراء المتاحون:\n"
@@ -53,16 +54,18 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE, surah: int, ayah_from: int,
-                       ayah_to: int, reciter: str, lang: str, style: str = "gradient", theme: str = "default"):
+                       ayah_to: int, reciter: str, lang: str, style: str = "gradient",
+                       theme: str = "default", repeat: int = 1):
     label = f"سورة {surah} آية {ayah_from}" + (f"-{ayah_to}" if ayah_to != ayah_from else "")
+    repeat_txt = f" — تكرار {repeat}x" if repeat > 1 else ""
     msg = await update.message.reply_text(
-        f"🎬 جاري تجهيز الفيديو المطوّر...\n{label} — {RECITER_NAMES.get(reciter, reciter)}")
+        f"🎬 جاري تجهيز الفيديو المطوّر...\n{label}{repeat_txt} — {RECITER_NAMES.get(reciter, reciter)}")
     try:
         infos = [fetch_ayah(surah, a, reciter=reciter, lang=lang)
                  for a in range(ayah_from, ayah_to + 1)]
         tmp = tempfile.mkdtemp(prefix="quran_bot_")
         out = os.path.join(tmp, f"video_{surah}_{ayah_from}-{ayah_to}.mp4")
-        make_video(infos, out, workdir=tmp, style=style, theme=theme)
+        make_video(infos, out, workdir=tmp, style=style, theme=theme, repeat=repeat)
         with open(out, "rb") as f:
             await update.message.reply_video(
                 f,
@@ -99,8 +102,9 @@ async def cmd_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     style = "nature" if "nature" in args else "gradient"
     theme = "sunset" if "sunset" in args else ("dark" if "dark" in args else "default")
+    repeat = 3 if ("repeat" in args or "x3" in args) else 1
     
-    await handle_video(update, ctx, surah, ayah_from, ayah_to, reciter, lang, style, theme)
+    await handle_video(update, ctx, surah, ayah_from, ayah_to, reciter, lang, style, theme, repeat)
 
 
 async def plain_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

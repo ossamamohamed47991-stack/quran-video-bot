@@ -339,6 +339,17 @@ def _audio_duration(mp3_path):
         return 30.0
 
 
+def _repeat_audio(audio_in, audio_out, times=3, gap=1.5):
+    """تكرار الصوت times مرات مع فجوة gap ثواني بين كل مرة (وضع الحفظ)"""
+    branches = "".join(f"[a{i}]" for i in range(times))
+    pads = "".join(f"[a{i}]apad=pad_dur={gap}[a{i}p];" for i in range(times))
+    concat_in = "".join(f"[a{i}p]" for i in range(times))
+    cmd = ["ffmpeg", "-y", "-i", audio_in, "-filter_complex",
+           f"[0:a]asplit={times}{branches};{pads}{concat_in}concat=n={times}:v=0:a=1[a]",
+           "-map", "[a]", "-c:a", "libmp3lame", "-q:a", "2", audio_out]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=180)
+
+
 # ---------------------------------------------------------------- التشفير
 
 def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom=True,
@@ -408,8 +419,10 @@ def _rss_mb():
     return None
 
 
-def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, theme="default"):
-    """توليد فيديو لآية واحدة أو نطاق آيات. style: gradient | nature, theme: default | sunset | dark | nature_gradient"""
+def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, theme="default",
+               repeat=1):
+    """توليد فيديو لآية واحدة أو نطاق آيات. style: gradient | nature, theme: default | sunset | dark | nature_gradient
+    repeat: عدد مرات تكرار التلاوة (وضع الحفظ)"""
     if isinstance(ayah_infos, dict):
         ayah_infos = [ayah_infos]
     tmp = workdir or tempfile.mkdtemp(prefix="quran_")
@@ -442,6 +455,10 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
             f.write(r.content)
 
         _trim_silence(audio_raw, audio_trim)
+        if repeat > 1:
+            audio_repeat = os.path.join(tmp, f"audio_{i}_repeat.mp3")
+            _repeat_audio(audio_trim, audio_repeat, times=repeat)
+            audio_trim = audio_repeat
         dur = _audio_duration(audio_trim)
         build_ass(info, dur, ass_file)
         log.info(f"RSS قبل التشفير: {_rss_mb()} MB (مدة الصوت {dur:.1f}s)")

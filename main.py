@@ -155,23 +155,18 @@ def main():
         port = int(os.environ.get("PORT", "8080"))
         url_path = BOT_TOKEN.replace(":", "-")  # مسار سري لا يعرفه غير تليجرام
         secret = BOT_TOKEN.replace(":", "-")    # تليجرام يرفض ":" في الـ secret token
+        full_url = f"{webhook_url}/{url_path}"
 
-        async def post_init(application):
-            await application.bot.set_webhook(
-                url=f"{webhook_url}/{url_path}",
-                secret_token=secret,
-                drop_pending_updates=True,
-            )
-            log.info(f"Webhook set: {webhook_url}/{url_path}")
-
-        app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+        app = Application.builder().token(BOT_TOKEN).build()
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("video", cmd_video))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_message))
         app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, plain_message))
-        log.info(f"Webhook mode على المنفذ {port}")
+        log.info(f"Webhook mode: {full_url} على المنفذ {port}")
+        # PTB بيعمل setWebhook لوحده في bootstrap بالـ webhook_url ده
         app.run_webhook(listen="0.0.0.0", port=port, url_path=url_path,
-                        secret_token=secret, allowed_updates=Update.ALL_TYPES)
+                        webhook_url=full_url, secret_token=secret,
+                        drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
     else:
         log.info("Polling mode (مفيش WEBHOOK_URL — تشغيل محلي)")
         app.run_polling(allowed_updates=Update.ALL_TYPES)

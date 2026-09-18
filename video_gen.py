@@ -18,6 +18,9 @@ from bidi.algorithm import get_display
 API_BASE = "https://api.alquran.cloud/v1"
 EVERYAYAH_BASE = "https://everyayah.com/data"
 
+# رمز السطر الجديد في ASS (خارج الـ f-string عشان يتوافق مع Python < 3.12)
+_N = "\\N"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_DIR = os.path.join(BASE_DIR, "assets", "fonts")
 BG_DIR = os.path.join(BASE_DIR, "assets", "bg")
@@ -258,11 +261,11 @@ def build_ass(ayah_info, duration, out_ass):
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
         f"Dialogue: 0,{start},{end},Header,,0,0,0,,{{\\an8\\pos(540,140)}}{_ass_escape(header)}",
         f"Dialogue: 0,{start},{end},Reciter,,0,0,0,,{{\\an8\\pos(540,235)}}{_ass_escape(reciter)}",
-        f"Dialogue: 0,{start},{end},Ayah,,0,0,0,,{{\\an5\\pos(540,{y_ar_center:.0f})}}{_ass_escape(chr(10).join(ar_lines)).replace(chr(10), '\\N')}",
+        f"Dialogue: 0,{start},{end},Ayah,,0,0,0,,{{\\an5\\pos(540,{y_ar_center:.0f})}}{_ass_escape(chr(10).join(ar_lines)).replace(chr(10), _N)}",
     ]
     if tr_lines:
         lines.append(
-            f"Dialogue: 0,{start},{end},Trans,,0,0,0,,{{\\an5\\pos(540,{y_tr_center:.0f})}}{_ass_escape(chr(10).join(tr_lines)).replace(chr(10), '\\N')}")
+            f"Dialogue: 0,{start},{end},Trans,,0,0,0,,{{\\an5\\pos(540,{y_tr_center:.0f})}}{_ass_escape(chr(10).join(tr_lines)).replace(chr(10), _N)}")
     lines.append(
         f"Dialogue: 0,{start},{end},Num,,0,0,0,,{{\\an5\\pos(540,{H - 250})}}{_ass_escape(num)}")
 

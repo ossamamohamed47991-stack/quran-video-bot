@@ -49,6 +49,17 @@ ASS_FONT_TRANS = "Arial"
 FONT_ARABIC = os.path.join(FONT_DIR, "arabtype.ttf")
 FONT_LATIN = os.path.join(FONT_DIR, "arial.ttf")
 
+# خطوط إضافية: اسم الخيار -> (اسم العائلة في ASS, اسم الملف)
+FONT_OPTIONS = {
+    "default": ("Arabic Typesetting", "arabtype.ttf"),
+    "amiri": ("Amiri", "Amiri-Regular.ttf"),
+    "kufi": ("Lalezar", "Lalezar-Regular.ttf"),
+    "ruqaa": ("Aref Ruqaa", "ArefRuqaa-Regular.ttf"),
+}
+
+# ووترمارك على الفيديو (اسم القناة) — غيّره من متغير البيئة WATERMARK
+WATERMARK = os.environ.get("WATERMARK", "").strip()
+
 # القراء: id -> (اسم عربي, مجلد everyayah)
 RECITERS = {
     "alafasy": ("مشاري العفاسي", "Alafasy_64kbps"),
@@ -256,15 +267,19 @@ def _fit_block(d, text, font_path, start_size, max_w, max_h, min_size, line_rati
     return lines, min_size, len(lines) * line_h
 
 
-def build_ass(ayah_info, duration, out_ass):
-    """يبني ملف ASS لعرض نص الآية + الترجمة بتشكيل سليم (libass/HarfBuzz)"""
+def build_ass(ayah_info, duration, out_ass, font="default", custom=False):
+    """يبني ملف ASS لعرض نص الآية + الترجمة بتشكيل سليم (libass/HarfBuzz)
+    font: default | amiri | kufi | ruqaa — custom: نص مخصص من غير تلاوة"""
     d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     max_w = ASS_W - 160
     top, bottom = 340, ASS_H - 260
 
+    font_family, font_file = FONT_OPTIONS.get(font, FONT_OPTIONS["default"])
+    font_path = os.path.join(FONT_DIR, font_file)
+
     # نص الآية
     words = len(ayah_info["text"].split())
-    ar_lines, ar_fs, ar_h = _fit_block(d, ayah_info["text"], FONT_ARABIC,
+    ar_lines, ar_fs, ar_h = _fit_block(d, ayah_info["text"], font_path,
                                        _font_size_for(words), max_w, bottom - top,
                                        min_size=30, line_ratio=1.5)
 
@@ -274,7 +289,7 @@ def build_ass(ayah_info, duration, out_ass):
     if ayah_info.get("translation"):
         tr_arabic = bool(re.search(r"[\u0600-\u06FF]", ayah_info["translation"]))
         tr_max = int((bottom - top) * 0.45)
-        tr_font = FONT_ARABIC if tr_arabic else FONT_LATIN
+        tr_font = font_path if tr_arabic else FONT_LATIN
         tr_lines, tr_fs, tr_h = _fit_block(d, ayah_info["translation"], tr_font,
                                            36, max_w, tr_max, min_size=22,
                                            line_ratio=1.5 if tr_arabic else 1.4)
@@ -304,21 +319,31 @@ def build_ass(ayah_info, duration, out_ass):
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: Header,{ASS_FONT_HEADER},54,&H0082D7FF,&H0082D7FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,8,60,60,140,1",
         f"Style: Reciter,{ASS_FONT_RECITER},40,&H00DCD2C8,&H00DCD2C8,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,8,60,60,230,1",
-        f"Style: Ayah,{ASS_FONT_AYAH},{ar_fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,3,1,5,60,60,0,1",
-        f"Style: Trans,{ASS_FONT_AYAH if tr_arabic else ASS_FONT_TRANS},{tr_fs or 30},&H00EBEBEB,&H00EBEBEB,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
-        f"Style: Num,{ASS_FONT_AYAH},50,&H0082D7FF,&H0082D7FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
+        f"Style: Ayah,{font_family},{ar_fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,3,1,5,60,60,0,1",
+        f"Style: Trans,{font_family if tr_arabic else ASS_FONT_TRANS},{tr_fs or 30},&H00EBEBEB,&H00EBEBEB,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
+        f"Style: Num,{font_family},50,&H0082D7FF,&H0082D7FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-        f"Dialogue: 0,{start},{end},Header,,0,0,0,,{{\\an8\\pos(540,140)}}{_ass_escape(header)}",
-        f"Dialogue: 0,{start},{end},Reciter,,0,0,0,,{{\\an8\\pos(540,235)}}{_ass_escape(reciter)}",
-        f"Dialogue: 0,{start},{end},Ayah,,0,0,0,,{{\\an5\\pos(540,{y_ar_center:.0f})}}{_ass_escape(chr(10).join(ar_lines)).replace(chr(10), _N)}",
     ]
+    if not custom:
+        lines.append(f"Dialogue: 0,{start},{end},Header,,0,0,0,,{{\\an8\\pos(540,140)}}{_ass_escape(header)}")
+        lines.append(f"Dialogue: 0,{start},{end},Reciter,,0,0,0,,{{\\an8\\pos(540,235)}}{_ass_escape(reciter)}")
+    lines.append(
+        f"Dialogue: 0,{start},{end},Ayah,,0,0,0,,{{\\an5\\pos(540,{y_ar_center:.0f})}}{_ass_escape(chr(10).join(ar_lines)).replace(chr(10), _N)}")
     if tr_lines:
         lines.append(
             f"Dialogue: 0,{start},{end},Trans,,0,0,0,,{{\\an5\\pos(540,{y_tr_center:.0f})}}{_ass_escape(chr(10).join(tr_lines)).replace(chr(10), _N)}")
-    lines.append(
-        f"Dialogue: 0,{start},{end},Num,,0,0,0,,{{\\an5\\pos(540,{ASS_H - 250})}}{_ass_escape(num)}")
+    if not custom:
+        lines.append(
+            f"Dialogue: 0,{start},{end},Num,,0,0,0,,{{\\an5\\pos(540,{ASS_H - 250})}}{_ass_escape(num)}")
+    if WATERMARK:
+        lines.append(
+            f"Dialogue: 0,{start},{end},Watermark,,0,0,0,,{{\\an2\\pos(540,{ASS_H - 70})}}{_ass_escape(WATERMARK)}")
+        # إضافة الستايل جنب باقي الستايلات (قبل السطر الفاضي اللي قبل [Events])
+        wm_style = (f"Style: Watermark,{ASS_FONT_RECITER},30,&H50FFFFFF,&H50FFFFFF,"
+                    f"&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,60,60,0,1")
+        lines.insert(lines.index(""), wm_style)
 
     with open(out_ass, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(lines))
@@ -366,9 +391,10 @@ def _repeat_audio(audio_in, audio_out, times=3, gap=1.5):
 # ---------------------------------------------------------------- التشفير
 
 def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom=True,
-                    cwd=None):
+                    cwd=None, progress_cb=None):
     """تشفير مقطع واحد. cwd = مجلد العمل (فيه fonts/ والـ ass) => مسارات نسبية
-    من غير نقطتين ولا مسافات => مفيش مشاكل escape في الفلتر"""
+    من غير نقطتين ولا مسافات => مفيش مشاكل escape في الفلتر
+    progress_cb(pct): استدعاء بنسبة التقدم أثناء التشفير (0-99)"""
     dur = _audio_duration(audio_mp3)
     fade_out = max(0.0, dur - 0.7)
     af = (f"afade=t=in:st=0:d=0.2,afade=t=out:st={max(0.0, dur - 0.2):.2f}:d=0.2")
@@ -409,7 +435,28 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
                "-c:a", "aac", "-b:a", "192k", "-af", af,
                "-pix_fmt", "yuv420p",
                "-movflags", "+faststart", out_mp4]
-    subprocess.run(cmd, check=True, capture_output=True, timeout=900, cwd=cwd)
+
+    if progress_cb:
+        # تشغيل مع قراءة نسبة التقدم من stdout (out_time_ms)
+        cmd += ["-progress", "pipe:1", "-nostats"]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, cwd=cwd)
+        last = [0]
+        for line in proc.stdout:
+            if line.startswith("out_time_ms="):
+                try:
+                    t = int(line.strip().split("=")[1]) / 1_000_000
+                    pct = min(99, int(t / dur * 100))
+                    if pct > last[0]:
+                        last[0] = pct
+                        progress_cb(pct)
+                except Exception:
+                    pass
+        proc.wait()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+    else:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=900, cwd=cwd)
 
 
 def _concat_segments(segments, out_mp4):
@@ -435,22 +482,60 @@ def _rss_mb():
 
 
 def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, theme="default",
-               repeat=1):
+               repeat=1, custom_text=None, font="default", progress_cb=None):
     """توليد فيديو لآية واحدة أو نطاق آيات. style: gradient | nature, theme: default | sunset | dark | nature_gradient
-    repeat: عدد مرات تكرار التلاوة (وضع الحفظ)"""
+    repeat: عدد مرات تكرار التلاوة (وضع الحفظ)
+    custom_text: نص مخصص من غير تلاوة (فيديو دعاء/حديث)
+    font: default | amiri | kufi | ruqaa — progress_cb(pct): نسبة التقدم"""
     if isinstance(ayah_infos, dict):
         ayah_infos = [ayah_infos]
     tmp = workdir or tempfile.mkdtemp(prefix="quran_")
     fonts_tmp = os.path.join(tmp, "fonts")
     os.makedirs(fonts_tmp, exist_ok=True)
     for fn in ("arabtype.ttf", "arial.ttf", "DUBAI-BOLD.TTF", "DUBAI-MEDIUM.TTF",
-               "DUBAI-REGULAR.TTF", "DUBAI-LIGHT.TTF"):
+               "DUBAI-REGULAR.TTF", "DUBAI-LIGHT.TTF",
+               "Amiri-Regular.ttf", "ArefRuqaa-Regular.ttf", "Lalezar-Regular.ttf"):
         src = os.path.join(FONT_DIR, fn)
         if os.path.isfile(src):
             dst = os.path.join(fonts_tmp, fn)
             if not os.path.isfile(dst):
                 import shutil
                 shutil.copy2(src, dst)
+
+    if custom_text:
+        # فيديو نص مخصص: صوت صامت بمدة حسب طول النص
+        words = len(custom_text.split())
+        dur = max(6, min(25, int(words * 0.6) + 4))
+        silent = os.path.join(tmp, "silent.mp3")
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                        "-t", str(dur), "-c:a", "libmp3lame", "-q:a", "4", silent],
+                       check=True, capture_output=True, timeout=60)
+        info = {"text": custom_text, "surah_name": "", "ayah": "", "reciter": "alafasy"}
+        if progress_cb:
+            progress_cb(5)
+        bg_png = os.path.join(tmp, "bg_0.png")
+        make_bg(bg_png, theme=theme)
+        ass_file = os.path.join(tmp, "subs_0.ass")
+        build_ass(info, dur, ass_file, font=font, custom=True)
+        seg_mp4 = os.path.join(tmp, "seg_0.mp4")
+        if progress_cb:
+            progress_cb(15)
+        try:
+            _encode_segment(bg_png, silent, ass_file, seg_mp4, style=style, zoom=zoom,
+                            cwd=tmp, progress_cb=lambda p: progress_cb(15 + int(p * 0.8)))
+        except subprocess.CalledProcessError:
+            if zoom:
+                log.warning("التشفير بالـ zoom فشل (نص مخصص) — من غير zoom")
+                _encode_segment(bg_png, silent, ass_file, seg_mp4, style=style,
+                                zoom=False, cwd=tmp,
+                                progress_cb=lambda p: progress_cb(15 + int(p * 0.8)))
+            else:
+                raise
+        os.replace(seg_mp4, out_mp4)
+        if progress_cb:
+            progress_cb(100)
+        return out_mp4
+
     segments = []
     for i, info in enumerate(ayah_infos):
         bg_png = os.path.join(tmp, f"bg_{i}.png")
@@ -482,6 +567,8 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
         else:
             make_bg(bg_png, theme=theme)
 
+        if progress_cb:
+            progress_cb(5 + int(20 * i / len(ayah_infos)))
         r = requests.get(info["audio_url"], timeout=120)
         r.raise_for_status()
         with open(audio_raw, "wb") as f:
@@ -493,17 +580,19 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
             _repeat_audio(audio_trim, audio_repeat, times=repeat)
             audio_trim = audio_repeat
         dur = _audio_duration(audio_trim)
-        build_ass(info, dur, ass_file)
+        build_ass(info, dur, ass_file, font=font)
         log.info(f"RSS قبل التشفير: {_rss_mb()} MB (مدة الصوت {dur:.1f}s)")
         try:
             _encode_segment(bg_png, audio_trim, ass_file, seg_mp4, style=style, zoom=zoom,
-                            cwd=tmp)
+                            cwd=tmp,
+                            progress_cb=(lambda p, i=i: progress_cb(25 + int(70 * (i + p / 100) / len(ayah_infos)))) if progress_cb else None)
         except subprocess.CalledProcessError:
             if zoom:
                 # شبكة أمان: لو التشفير وقع (ذاكرة/مشكلة ffmpeg) => من غير zoom
                 log.warning("التشفير بالـ zoom فشل — إعادة المحاولة من غير zoom")
                 _encode_segment(bg_png, audio_trim, ass_file, seg_mp4, style=style,
-                                zoom=False, cwd=tmp)
+                                zoom=False, cwd=tmp,
+                                progress_cb=(lambda p, i=i: progress_cb(25 + int(70 * (i + p / 100) / len(ayah_infos)))) if progress_cb else None)
             else:
                 raise
         segments.append(seg_mp4)
@@ -512,4 +601,6 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
         os.replace(segments[0], out_mp4)
     else:
         _concat_segments(segments, out_mp4)
+    if progress_cb:
+        progress_cb(100)
     return out_mp4

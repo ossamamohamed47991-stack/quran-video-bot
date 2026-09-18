@@ -14,10 +14,10 @@ from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (Application, CommandHandler, MessageHandler, ContextTypes,
-                          filters, ChatMemberHandler, CallbackQueryHandler)
+                          filters, ChatMemberHandler, CallbackQueryHandler, InlineQueryHandler)
 
 from config import BOT_TOKEN, DEFAULT_RECITER, ALLOWED_USERS, OWNER_USERNAME, OWNER_USER_IDS
-from video_gen import fetch_ayah, make_video, RECITERS, VERSE_COUNTS
+from video_gen import fetch_ayah, make_video, RECITERS, VERSE_COUNTS, FONT_OPTIONS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -94,7 +94,11 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "• مع ترجمة: `/video 2:255 alafasy en`\n"
         "• مع تفسير: `/video 2:255 alafasy tafsir`\n"
         "• للحفظ (تكرار 3x): `/video 2:255 alafasy repeat`\n"
-        "• خلفية ذكاء اصطناعي: `/video 2:255 alafasy ai`\n\n"
+        "• خلفية ذكاء اصطناعي: `/video 2:255 alafasy ai`\n"
+        "• بخط مختلف: `/video 2:255 alafasy amiri` (أو `kufi` أو `ruqaa`)\n"
+        "• بحث بالكلمة: `/search الصبر`\n"
+        "• نص مخصص: `/text اللهم صل وسلم على نبينا محمد`\n"
+        "• في أي شات: اكتب `@itQURAN_BOT 2:255` (Inline)\n\n"
         "اللغات: `en fr tr ru es de id bn ur fa hi ta ml sw uz`\n"
         "المفسرون: `tafsir` (الميسر) `jalalayn` (جلالين)\n\n"
         "القناة:\n"
@@ -113,8 +117,14 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE, surah: int, ayah_from: int,
                        ayah_to: int, reciter: str, lang: str, style: str = "gradient",
-                       theme: str = "default", repeat: int = 1):
-    label = f"سورة {surah} آية {ayah_from}" + (f"-{ayah_to}" if ayah_to != ayah_from else "")
+                       theme: str = "default", repeat: int = 1, font: str = "default",
+                       custom_text: str = None):
+    if custom_text:
+        label = "نص مخصص"
+        short = custom_text[:40] + ("…" if len(custom_text) > 40 else "")
+    else:
+        label = f"سورة {surah} آية {ayah_from}" + (f"-{ayah_to}" if ayah_to != ayah_from else "")
+        short = label
     repeat_txt = f" — تكرار {repeat}x" if repeat > 1 else ""
     msg = await update.message.reply_text(
         f"🎬 جاري تجهيز الفيديو المطوّر...\n{label}{repeat_txt} — {RECITER_NAMES.get(reciter, reciter)}")
@@ -123,39 +133,79 @@ async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE, surah: in
         cache_dir = os.environ.get("CACHE_DIR", os.path.join(tempfile.gettempdir(), "quran_cache"))
         os.makedirs(cache_dir, exist_ok=True)
         key = hashlib.md5(
-            f"{surah}:{ayah_from}-{ayah_to}:{reciter}:{lang}:{style}:{theme}:{repeat}:{os.environ.get('VIDEO_RES','720x1280')}".encode()
+            f"{surah}:{ayah_from}-{ayah_to}:{reciter}:{lang}:{style}:{theme}:{repeat}:{font}:{custom_text}:{os.environ.get('VIDEO_RES','720x1280')}".encode()
         ).hexdigest()
         out = os.path.join(cache_dir, f"{key}.mp4")
         if os.path.isfile(out):
             log.info(f"كاش: {label} موجود — رد فوري")
             with open(out, "rb") as f:
-                await update.message.reply_video(
+                sent = await update.message.reply_video(
                     f,
-                    caption=f"﴿ {label} ﴾ (من الكاش)\n🎙 {RECITER_NAMES.get(reciter, reciter)}",
+                    caption=f"﴿ {short} ﴾ (من الكاش)\n🎙 {RECITER_NAMES.get(reciter, reciter)}",
                     supports_streaming=True,
                 )
             await msg.delete()
+            _save_video_file_id(surah, ayah_from, ayah_to, sent)
             return
 
-        infos = [fetch_ayah(surah, a, reciter=reciter, lang=lang)
-                 for a in range(ayah_from, ayah_to + 1)]
+        if custom_text:
+            infos = [{"text": custom_text, "surah_name": "", "ayah": "",
+                      "reciter": reciter}]
+        else:
+            infos = [fetch_ayah(surah, a, reciter=reciter, lang=lang)
+                     for a in range(ayah_from, ayah_to + 1)]
         tmp = tempfile.mkdtemp(prefix="quran_bot_")
+
+        # شريط تقدم: تحديث رسالة بنسبة مئوية أثناء التوليد
+        loop = asyncio.get_running_loop()
+        last_pct = [0]
+        progress_msg = await update.message.reply_text("⏳ جاري التوليد... 0%")
+
+        async def edit_progress(pct):
+            try:
+                await progress_msg.edit_text(f"⏳ جاري التوليد... {pct}%")
+            except Exception:
+                pass
+
+        def cb(pct):
+            if pct - last_pct[0] >= 10 or pct == 100:
+                last_pct[0] = pct
+                asyncio.run_coroutine_threadsafe(edit_progress(pct), loop)
+
         # توليد في thread منفصل حتى لا يتجمد البوت أثناء التوليد
         await asyncio.to_thread(make_video, infos, out, workdir=tmp,
-                                style=style, theme=theme, repeat=repeat)
+                                style=style, theme=theme, repeat=repeat,
+                                custom_text=custom_text, font=font, progress_cb=cb)
         with open(out, "rb") as f:
-            await update.message.reply_video(
+            sent = await update.message.reply_video(
                 f,
-                caption=f"﴿ {infos[0]['surah_name']} — الآيات {ayah_from}-{ayah_to} ﴾\n"
-                        f"🎙 {RECITER_NAMES.get(reciter, reciter)}",
+                caption=f"﴿ {short} ﴾\n🎙 {RECITER_NAMES.get(reciter, reciter)}",
                 supports_streaming=True,
             )
+        await progress_msg.delete()
         await msg.delete()
+        _save_video_file_id(surah, ayah_from, ayah_to, sent)
     except ValueError as e:
         await msg.edit_text(f"❌ {e}")
     except Exception as e:
         log.exception("فشل توليد الفيديو")
         await msg.edit_text(f"❌ حصل خطأ: {e}\nتأكد إن رقم السورة والآية صحيحين.")
+
+
+def _save_video_file_id(surah, ayah_from, ayah_to, sent):
+    """حفظ file_id للفيديوهات المولدة — للاستخدام في الـ inline mode"""
+    try:
+        if not sent or not sent.video:
+            return
+        data = load_data()
+        videos = data.setdefault("videos", {})
+        fid = sent.video.file_id
+        if ayah_to == ayah_from:
+            videos[f"{surah}:{ayah_from}"] = {"file_id": fid, "title": f"سورة {surah} آية {ayah_from}"}
+        videos[f"{surah}:{ayah_from}-{ayah_to}"] = {"file_id": fid, "title": f"سورة {surah} آيات {ayah_from}-{ayah_to}"}
+        save_data(data)
+    except Exception as e:
+        log.warning(f"حفظ file_id فشل: {e}")
 
 
 async def cmd_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -175,14 +225,24 @@ async def cmd_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     surah, ayah_from = int(m.group(1)), int(m.group(2))
     ayah_to = int(m.group(3)) if m.group(3) else ayah_from
 
-    reciter = args[1] if len(args) > 1 and args[1] in RECITERS else DEFAULT_RECITER
-    lang = args[2] if len(args) > 2 and len(args[2]) <= 10 and args[2] not in ["sunset", "dark", "nature", "gradient"] else None
-
     style = "ai" if "ai" in args else ("nature" if "nature" in args else "gradient")
     theme = "sunset" if "sunset" in args else ("dark" if "dark" in args else "default")
     repeat = 3 if ("repeat" in args or "x3" in args) else 1
+    font = "default"
+    for a in args:
+        if a.startswith("font="):
+            font = a.split("=", 1)[1].lower()
+        elif a in FONT_OPTIONS and a != "default":
+            font = a
 
-    await handle_video(update, ctx, surah, ayah_from, ayah_to, reciter, lang, style, theme, repeat)
+    remaining = [a for a in args[1:] if a not in ("ai", "nature", "sunset", "dark",
+                                                   "repeat", "x3") and not a.startswith("font=")
+                 and a not in FONT_OPTIONS]
+    reciter = remaining[0] if remaining and remaining[0] in RECITERS else DEFAULT_RECITER
+    lang = remaining[1] if len(remaining) > 1 and len(remaining[1]) <= 10 and remaining[1] not in FONT_OPTIONS else None
+
+    await handle_video(update, ctx, surah, ayah_from, ayah_to, reciter, lang, style, theme,
+                       repeat, font)
 
 
 async def plain_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -216,6 +276,111 @@ async def plain_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("أرسل رقم الآية بصيغة `2:255` أو استخدم `/start`",
                                         parse_mode="Markdown")
+
+
+# ---------------------------------------------------------------- بحث + نص مخصص + Inline
+
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    track_user(update.effective_user.id, update.effective_user.username)
+    keyword = " ".join(ctx.args).strip()
+    if not keyword:
+        await update.message.reply_text("استخدم: `/search كلمة`\nمثال: `/search الصبر`",
+                                        parse_mode="Markdown")
+        return
+    try:
+        import requests as _rq
+        from urllib.parse import quote
+        r = _rq.get(f"https://api.alquran.cloud/v1/search/{quote(keyword)}/all/quran-uthmani",
+                    timeout=30)
+        data = r.json().get("data", {})
+        matches = data.get("matches", [])
+        if not matches:
+            await update.message.reply_text(f"🔍 مفيش نتائج لـ «{keyword}».")
+            return
+        keyboard = []
+        for m in matches[:3]:
+            s, a = m["surah"]["number"], m["numberInSurah"]
+            keyboard.append([InlineKeyboardButton(
+                f"﴿ {m['surah']['englishName']} {a} ﴾", callback_data=f"srch_{s}:{a}")])
+        await update.message.reply_text(
+            f"🔍 نتائج البحث عن «{keyword}» ({len(matches)} نتيجة):\n\n"
+            f"«{matches[0]['text'][:120]}…»\n\nاختر آية لتوليد فيديو:",
+            reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        log.exception("فشل البحث")
+        await update.message.reply_text(f"❌ حصل خطأ في البحث: {e}")
+
+
+async def search_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    try:
+        s, a = (int(x) for x in q.data.split("_")[1].split(":"))
+        await q.edit_message_text(f"🎬 جاري توليد فيديو سورة {s} آية {a}...")
+        await handle_video(update, ctx, s, a, a, DEFAULT_RECITER, None)
+    except Exception as e:
+        log.exception("فشل توليد من البحث")
+        await q.edit_message_text(f"❌ حصل خطأ: {e}")
+
+
+async def cmd_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not _allowed(update.effective_user.id):
+        return
+    track_user(update.effective_user.id, update.effective_user.username)
+    text = " ".join(ctx.args).strip()
+    if not text:
+        await update.message.reply_text(
+            "استخدم: `/text نصك`\nمثال: `/text اللهم صل وسلم على نبينا محمد`",
+            parse_mode="Markdown")
+        return
+    if len(text) > 500:
+        await update.message.reply_text("❌ النص طويل جداً (الحد الأقصى 500 حرف).")
+        return
+    await handle_video(update, ctx, 0, 0, 0, DEFAULT_RECITER, None, custom_text=text)
+
+
+async def inline_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """@bot 2:255 في أي شات — يرجع فيديوهات من الكاش أو اقتراح توليد"""
+    from telegram import InlineQueryResultCachedVideo, InlineQueryResultArticle, InputTextMessageContent
+    q = (update.inline_query.query or "").strip()
+    data = load_data()
+    videos = data.get("videos", {})
+    results = []
+
+    if q:
+        m = AYAH_RE.match(q)
+        if m:
+            key = f"{int(m.group(1))}:{int(m.group(2))}"
+            hit = videos.get(key)
+            if hit:
+                results.append(InlineQueryResultCachedVideo(
+                    id=f"v{key}", video_file_id=hit["file_id"],
+                    title=f"﴿ {hit['title']} ﴾", description="فيديو جاهز من الكاش",
+                    caption=f"﴿ {hit['title']} ﴾"))
+            else:
+                results.append(InlineQueryResultArticle(
+                    id=f"g{key}", title=f"🎬 توليد {key}",
+                    description="اضغط لفتح البوت وتوليد الفيديو",
+                    input_message_content=InputTextMessageContent(
+                        f"ابعت للبوت: /video {key}")))
+    else:
+        # آخر الفيديوهات المولدة
+        for key, v in list(videos.items())[-8:]:
+            results.append(InlineQueryResultCachedVideo(
+                id=f"r{key}", video_file_id=v["file_id"],
+                title=f"﴿ {v['title']} ﴾", description="فيديو جاهز",
+                caption=f"﴿ {v['title']} ﴾"))
+
+    if not results:
+        results.append(InlineQueryResultArticle(
+            id="h", title="🌙 بوت الفيديوهات القرآنية",
+            description="اكتب 2:255 مثلاً، أو افتح البوت",
+            input_message_content=InputTextMessageContent(
+                "🌙 بوت الفيديوهات القرآنية — جرب: /video 2:255")))
+
+    await update.inline_query.answer(results, cache_time=0, is_personal=True)
 
 
 # ---------------------------------------------------------------- ربط القناة
@@ -515,6 +680,8 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("video", cmd_video))
+    app.add_handler(CommandHandler("search", cmd_search))
+    app.add_handler(CommandHandler("text", cmd_text))
     app.add_handler(CommandHandler("linkchannel", cmd_linkchannel))
     app.add_handler(CommandHandler("confirm", cmd_confirm))
     app.add_handler(CommandHandler("unlinkchannel", cmd_unlinkchannel))
@@ -524,6 +691,8 @@ def main():
     app.add_handler(CommandHandler("panel", cmd_admin))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="^adm_"))
+    app.add_handler(CallbackQueryHandler(search_callback, pattern="^srch_"))
+    app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, plain_message))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, plain_message))
     app.add_handler(ChatMemberHandler(my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))

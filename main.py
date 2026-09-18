@@ -133,6 +133,20 @@ async def plain_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    # تشخيص البيئة: نسخة ffmpeg + الذاكرة المتاحة
+    try:
+        import subprocess
+        fv = subprocess.run(["ffmpeg", "-version"], capture_output=True,
+                            text=True, timeout=10).stdout.splitlines()[0]
+        log.info(f"FFMPEG: {fv}")
+        if os.path.exists("/proc/meminfo"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal") or line.startswith("MemAvailable"):
+                        log.info(f"MEM: {line.strip()}")
+    except Exception as e:
+        log.warning(f"تشخيص البيئة فشل: {e}")
+
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("video", cmd_video))

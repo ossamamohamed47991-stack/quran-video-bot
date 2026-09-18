@@ -10,10 +10,13 @@ import os
 import re
 import subprocess
 import tempfile
+import logging
 import requests
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
+
+log = logging.getLogger(__name__)
 
 API_BASE = "https://api.alquran.cloud/v1"
 EVERYAYAH_BASE = "https://everyayah.com/data"
@@ -362,7 +365,8 @@ def _encode_segment(bg_png, audio_mp3, ass_file, out_mp4, style="gradient", zoom
                "-vf", vf, "-map", "0:v", "-map", "1:a",
                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                "-c:a", "aac", "-b:a", "192k", "-af", af,
-               "-pix_fmt", "yuv420p", "-shortest", "-movflags", "+faststart", out_mp4]
+               "-pix_fmt", "yuv420p", "-t", f"{dur:.3f}", "-shortest",
+               "-movflags", "+faststart", out_mp4]
     subprocess.run(cmd, check=True, capture_output=True, timeout=900, cwd=cwd)
 
 
@@ -412,8 +416,17 @@ def make_video(ayah_infos, out_mp4, workdir=None, style="gradient", zoom=True, t
         _trim_silence(audio_raw, audio_trim)
         dur = _audio_duration(audio_trim)
         build_ass(info, dur, ass_file)
-        _encode_segment(bg_png, audio_trim, ass_file, seg_mp4, style=style, zoom=zoom,
-                        cwd=tmp)
+        try:
+            _encode_segment(bg_png, audio_trim, ass_file, seg_mp4, style=style, zoom=zoom,
+                            cwd=tmp)
+        except subprocess.CalledProcessError:
+            if zoom:
+                # شبكة أمان: لو التشفير وقع (ذاكرة/مشكلة ffmpeg) => من غير zoom
+                log.warning("التشفير بالـ zoom فشل — إعادة المحاولة من غير zoom")
+                _encode_segment(bg_png, audio_trim, ass_file, seg_mp4, style=style,
+                                zoom=False, cwd=tmp)
+            else:
+                raise
         segments.append(seg_mp4)
 
     if len(segments) == 1:
